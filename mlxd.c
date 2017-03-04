@@ -1,5 +1,5 @@
 /*
-   simple demonstration daemon for the MLX90620 16x4 thermopile array
+   simple demonstration daemon for the MLX9062x 16x4 thermopile array
 
    Copyright (C) 2015 Chuck Werbick
 
@@ -22,6 +22,10 @@
    Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  
 
 */
+/*
+   Updates: Copyright (C) 2017 Vipin Agrawal (SVTechie)
+*/
+
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,10 +39,24 @@
 
 #define VERSION "0.1.0"
 #define EXIT_FAILURE 1
+#define DEBUG 0
+#define DEBUG_TO 0
+#define MLX90620 0
+
+#define MLX_ADD (MLX90620 ? 0x90 : 0x40)
 
 char *xmalloc ();
 char *xrealloc ();
 char *xstrdup ();
+
+inline int signConv16 (int in) {
+   return (in >= 32768 ? in - 65536 : in);
+}
+
+inline int signConv8 (char in) {
+   return (in >= 128 ? in - 256 : in);
+}
+
 
 float temperatures[64];
 unsigned short temperaturesInt[64];
@@ -62,24 +80,24 @@ static struct option const long_options[] =
 };
 
 static int decode_switches (int argc, char **argv);
-int mlx90620_init ();
-int mlx90620_read_eeprom ();
-int mlx90620_write_config (unsigned char *lsb, unsigned char *msb);
-int mlx90620_read_config (unsigned char *lsb, unsigned char *msb);
-int mlx90620_write_trim (char t);
-char mlx90620_read_trim ();
-int mlx90620_por ();
-int mlx90620_set_refresh_hz (int hz);
-int mlx90620_ptat ();
-int mlx90620_cp ();
-float mlx90620_ta ();
-int mlx90620_ir_read ();
+int mlx9062x_init ();
+int mlx9062x_read_eeprom ();
+int mlx9062x_write_config (unsigned char *lsb, unsigned char *msb);
+int mlx9062x_read_config (unsigned char *lsb, unsigned char *msb);
+int mlx9062x_write_trim (char t);
+char mlx9062x_read_trim ();
+int mlx9062x_por ();
+int mlx9062x_set_refresh_hz (int hz);
+int mlx9062x_ptat ();
+int mlx9062x_cp ();
+float mlx9062x_ta ();
+int mlx9062x_ir_read ();
 
 
 char EEPROM[256];
 signed char ir_pixels[128];
 
-char mlxFifo[] = "/var/run/mlx90620.sock";
+char mlxFifo[] = "/var/run/mlx9062x.sock" ;
 
 
 void got_sigint(int sig) {
@@ -104,9 +122,10 @@ main (int argc, char **argv)
     float ta;
     int vir;
     int vcp;
-    float alpha;
+    double alpha, alpha_comp;
     float vir_compensated;
     float vcp_off_comp, vir_off_comp, vir_tgc_comp;
+    float ksta, ks4, ta4;
 
     /* IR pixel individual offset coefficient */
     int ai;
@@ -121,13 +140,13 @@ main (int argc, char **argv)
     /* Sensitivity coefficient of the compensation pixel */
     int alphacp;
     /* Thermal Gradient Coefficient */
-    int tgc;
+    float tgc;
     /* Scaling coefficient for slope of IR pixels offset */
     int bi_scale;
     /* Common sensitivity coefficient of IR pixels */
     int alpha0;
     /* Scaling coefficient for common sensitivity */
-    int alpha0_scale;
+    unsigned char alpha0_scale;
     /* Scaling coefficient for individual sensitivity */
     int delta_alpha_scale;
     /* Emissivity */
@@ -141,20 +160,22 @@ main (int argc, char **argv)
 
     printf("\n");
 
-    if ( mlx90620_init() ) {
-        printf("OK, MLX90620 init\n");
+    if ( mlx9062x_init() ) {
+        printf("OK, MLX9062x init\n");
     } else {
-        printf("MLX90620 init failed!\n");
+        printf("MLX9062x init failed!\n");
         exit(1);
     }
-    ta = mlx90620_ta();
+    usleep(10000);
+
+    ta = mlx9062x_ta();
     // If calibration fails then TA will be WAY too high. check and reinitialize if that happens
     while (ta > 350) 
     {
     	printf("Ta out of bounds! Max is 350, reading: %4.8f C\n", ta);
     	//out of bounds, reset and check again
-    	mlx90620_init();
-    	ta = mlx90620_ta();
+    	mlx9062x_init();
+    	ta = mlx9062x_ta();
     	usleep(10000);
     }
 
@@ -162,60 +183,111 @@ main (int argc, char **argv)
 
     /* To calc parameters */
 
-    vcp = mlx90620_cp();
-    acp = (signed char)EEPROM[0xD4];
-    bcp = (signed char)EEPROM[0xD5];
+    vcp = mlx9062x_cp();
+    int acommon  = signConv16 ((EEPROM[0xD1] << 8) | EEPROM[0xD0]);
+    acp = signConv16 ((EEPROM[0xD4] << 8) | EEPROM[0xD3]);
+    bcp = signConv8 (EEPROM[0xD5]);
     alphacp = ( EEPROM[0xD7] << 8 ) | EEPROM[0xD6];
-    tgc = (signed char)EEPROM[0xD8];
-    bi_scale = EEPROM[0xD9];
+    int tgc_int  = signConv8 (EEPROM[0xD8]);
+    tgc = (float)tgc_int/32;
+    int ai_scale = (EEPROM[0xD9] & 0xF0) >> 4;
+    bi_scale = (EEPROM[0xD9] & 0x0F);
     alpha0 = ( EEPROM[0xE1] << 8 ) | EEPROM[0xE0];
     alpha0_scale = EEPROM[0xE2];
     delta_alpha_scale = EEPROM[0xE3];
-    epsilon = (( EEPROM[0xE5] << 8 ) | EEPROM[0xE4] ) / 32768.0;
+    int epsilon_i = ( EEPROM[0xE5] << 8 ) | EEPROM[0xE4];
+    epsilon = (float)epsilon_i/ 32768.0;
 
+    if (MLX90620) {
+       ksta  = 0;
+       ks4   = 1;
+    } else {
+       ksta  = signConv16 ((EEPROM[0xE7] << 8) | EEPROM[0xE6]);
+       ks4   = signConv8 (EEPROM[0xC4]);
+       if (DEBUG) printf("KSTA: %f KS4:%f\n", ksta, ks4); 
+       ksta /= 1 << 20;
+       ks4  /= 1 << ((EEPROM[0xC0] & 0xf)+8);
+       if (DEBUG) printf("KSTA: %.2f KS4:%.2f\n", ksta, ks4); 
+    
+    } 
 
+    ta4   = pow((ta + 273.15), 4);
+
+    vcp_off_comp = (float)vcp - (acp + (bcp * (ta - 25.0)/ (1 << bi_scale)));
+
+    if (DEBUG) {
+      printf ("Vcp: %d \n", vcp );
+      printf ("Acp: %d \n", acp );
+      printf ("Bcp: %d \n", bcp );
+      printf ("E: %d \n", epsilon_i );
+      printf ("E_s: %f \n", epsilon );
+      printf ("Alphacp: %d \n", alphacp );
+      printf ("TGC_int: %d \n", tgc_int );
+      printf ("TGC: %0.2f \n", tgc );
+      printf ("BiScale: %d \n", bi_scale );
+      printf ("Alpha_Scale: %d \n", EEPROM[0xE3] );
+      printf ("D_Alpha_Scale: %d \n", EEPROM[0xE2] );
+    }
 
     /* do the work */
-
     do {
-
         /* POR/Brown Out flag */
-
-        while (!mlx90620_por) {
+        while (!mlx9062x_por()) {
             sleep(1);
-            mlx90620_init();
+            mlx9062x_init();
+	    if (DEBUG) printf("Waiting to Init\n");
         }
 
-        if ( !mlx90620_ir_read() ) exit(0);
+        if ( !mlx9062x_ir_read() ) { printf ("Not able to read\n\n"); exit(0); }
         for ( i = 0; i < 4; i++ ) {
             for ( j = 0; j < 16; j++ ) {
-
                 x = ((j * 4) + i); /* index */
-                vir = ( ir_pixels[x*2+1] << 8 ) | ir_pixels[x*2];
-                ai = (signed char)EEPROM[x];
-                bi = (signed char)EEPROM[0x40 + x];
+                vir = signConv16 (( ir_pixels[x*2+1] << 8 ) | ir_pixels[x*2]);
+                ai = acommon + (EEPROM[x]*ai_scale);
+                bi = signConv8 (EEPROM[0x40 + x]);
+                float bi_s = (float)bi/(1 << bi_scale);
                 delta_alpha = EEPROM[0x80 + x];
 
     		/* Calculate To */
-
-        	vcp_off_comp = (float)vcp - ( acp + (bcp / pow(2,EEPROM[217])) * (ta - 25.0)); //256
-        	vir_off_comp = (float)vir - ( ai + (bi / pow(2,EEPROM[217])) * (ta - 25.0)); //* 256
-        	vir_tgc_comp = vir_off_comp - (tgc / 32) * vcp_off_comp;
+        	vir_off_comp = (float)vir - (ai  + (bi_s  * (ta - 25.0)));
+        	vir_tgc_comp = vir_off_comp - tgc * vcp_off_comp;
         	vir_compensated = vir_tgc_comp / epsilon;
-	        alpha = ((alpha0 - (tgc / 32.0) * alphacp) / pow(2, alpha0_scale)) + delta_alpha / pow(2, delta_alpha_scale);
-	        to = pow(((vir_compensated / alpha) + pow((ta + 273.15), 4)), 1/4.0) - 273.15;
-	        temperaturesInt[x] = (unsigned short)((to + 273.15) * 100.0) ; //give back as Kelvin (hundtredths of degree) so it can be unsigned...
+
+		if (DEBUG) printf("Vir: %d, Ai: %d, Bi_ee:%d, Bi: %.6f, Ta: %.2f, TGC:%.2f, VIRcp:%.2f\n", vir, ai, bi, bi_s, ta, vir_tgc_comp, vir_compensated); 
+
+                if (DEBUG) 
+                  printf ("Alpha0:%d, TGC:%0.2f, Alphacp:%d, BiScale:%d, DAlpha:%d, DAlpha_scale:%d, Alpha_scale:%d\n", alpha0, tgc, alphacp, bi_scale, delta_alpha, delta_alpha_scale, alpha0_scale );
+
+		alpha = (double)delta_alpha/pow(2, delta_alpha_scale) + ((double)alpha0 - tgc*alphacp)/pow(2,alpha0_scale);
+		alpha_comp = (1 + ksta*(ta - 25))*alpha;
+
+                if (DEBUG) printf ("Vcp:%.2f, Alpha:%le, Alphacmp=%le, Ta4:%.2f\n", vir_compensated, alpha, alpha_comp, ta4); 
+	        double calc  = pow((vir_compensated/alpha_comp + ta4), 1/4.0);
+                if (MLX90620) {
+	           to = calc - 273.15;
+                } else {
+		   double sx            = alpha_comp * ks4 * calc;
+		   float alpha_comp_upd = alpha_comp*(1 - ks4*273.15) + sx;
+	                 to             = pow((vir_compensated/alpha_comp_upd + ta4), 1/4.0) - 273.15;
+		   if (DEBUG) printf("Calc:%le, AlphaComp:%le, KS4:%le, Sx:%le, AlphaCompSx:%le\n", calc, alpha_comp, ks4, sx, alpha_comp_upd);
+                   
+		}
+
+	        temperaturesInt[x] = (unsigned short)((to + 273.15) * 100.0) ; 
 	        temperatures[x] = to;
-
+		if (DEBUG_TO) printf("%.2f ", to); 
             }
-
+	    if (DEBUG_TO) printf("\n"); 
         }
-
-        fd = open(mlxFifo, O_WRONLY);
-        write(fd, temperaturesInt, sizeof(temperaturesInt));
-        close(fd);
-        //printf("Updated Temperatures!\n");
-        usleep(100000);
+        if (DEBUG_TO == 0) {
+           fd = open(mlxFifo, O_WRONLY);
+           write(fd, temperaturesInt, sizeof(temperaturesInt));
+           close(fd);
+           usleep(100000);
+        } else {
+           printf("Updated Temperatures!\n");
+           usleep(1000000);
+	}
     } while (1);
 
     unlink(mlxFifo);
@@ -227,7 +299,7 @@ main (int argc, char **argv)
 /* Init */
 
 int
-mlx90620_init()
+mlx9062x_init()
 {
     if (!bcm2835_init()) return 0;
     bcm2835_i2c_begin();
@@ -235,14 +307,15 @@ mlx90620_init()
     
     //sleep 5ms per datasheet
     usleep(5000);
-    if ( !mlx90620_read_eeprom() ) return 0;
-    if ( !mlx90620_write_trim( EEPROM[0xF7] ) ) return 0;
-    if ( !mlx90620_write_config( &EEPROM[0xF5], &EEPROM[0xF6] ) ) return 0;
+    if ( !mlx9062x_read_eeprom() ) return 0;
+    if ( !mlx9062x_write_trim( EEPROM[0xF7] ) ) return 0;
+    // Forcing scaling/precision to 3
+    if ( !mlx9062x_write_config( &EEPROM[0xF5], &EEPROM[0xF6] ) ) return 0;
     
-    mlx90620_set_refresh_hz( 4 );
+    mlx9062x_set_refresh_hz( 16 );
 
     unsigned char lsb, msb;
-    mlx90620_read_config( &lsb, &msb );
+    mlx9062x_read_config( &lsb, &msb );
 
     return 1;
 }
@@ -250,7 +323,7 @@ mlx90620_init()
 /* Read the whole EEPROM */
 
 int
-mlx90620_read_eeprom()
+mlx9062x_read_eeprom()
 {
     const unsigned char read_eeprom[] = {
         0x00 // command
@@ -269,8 +342,9 @@ mlx90620_read_eeprom()
 /* Write device configuration value */
 
 int
-mlx90620_write_config(unsigned char *lsb, unsigned char *msb)
+mlx9062x_write_config(unsigned char *lsb, unsigned char *msb)
 {
+    lsb[0] |= 0x18; 
     unsigned char lsb_check = lsb[0] - 0x55;
     unsigned char msb_check = msb[0] - 0x55;
 
@@ -295,7 +369,7 @@ mlx90620_write_config(unsigned char *lsb, unsigned char *msb)
 /* Reading configuration */
 
 int
-mlx90620_read_config(unsigned char *lsb, unsigned char *msb)
+mlx9062x_read_config(unsigned char *lsb, unsigned char *msb)
 {
     unsigned char config[2];
 
@@ -321,7 +395,7 @@ mlx90620_read_config(unsigned char *lsb, unsigned char *msb)
 /* Write the oscillator trimming value */
 
 int
-mlx90620_write_trim(char t)
+mlx9062x_write_trim(char t)
 {
     unsigned char trim[] = {
         0x00, // MSB
@@ -351,7 +425,7 @@ mlx90620_write_trim(char t)
 /* Read oscillator trimming register */
 
 char
-mlx90620_read_trim()
+mlx9062x_read_trim()
 {
     unsigned char trim_bytes[2];
 
@@ -375,18 +449,18 @@ mlx90620_read_trim()
 /* Return POR/Brown-out flag */
 
 int
-mlx90620_por()
+mlx9062x_por()
 {
     unsigned char config_lsb, config_msb;
 
-    mlx90620_read_config( &config_lsb, &config_msb );
+    mlx9062x_read_config( &config_lsb, &config_msb );
     return ((config_msb & 0x04) == 0x04);
 }
 
 /* Set IR Refresh rate */
 
 int
-mlx90620_set_refresh_hz(int hz)
+mlx9062x_set_refresh_hz(int hz)
 {
     char rate_bits;
     
@@ -429,9 +503,13 @@ mlx90620_set_refresh_hz(int hz)
     }
 
     unsigned char config_lsb, config_msb;
-    if ( !mlx90620_read_config( &config_lsb, &config_msb ) ) return 0;
-    config_lsb = rate_bits;
-    if ( !mlx90620_write_config( &config_lsb, &config_msb ) ) return 0;
+    if ( !mlx9062x_read_config( &config_lsb, &config_msb ) ) return 0;
+    if (DEBUG) printf ("Old config: %x %x\n", config_msb, config_lsb);
+
+    config_lsb = (config_lsb & 0xf0) | rate_bits;
+    if (DEBUG) printf ("New config: %x %x\n", config_msb, config_lsb);
+
+    if ( !mlx9062x_write_config( &config_lsb, &config_msb ) ) return 0;
 
     return 1;
 }
@@ -439,14 +517,14 @@ mlx90620_set_refresh_hz(int hz)
 /* Return PTAT (Proportional To Absolute Temperature) */
 
 int
-mlx90620_ptat()
+mlx9062x_ptat()
 {
     int ptat;
     unsigned char ptat_bytes[2];
 
     const unsigned char read_ptat[] = {
         0x02, // command
-        0x90, // start address
+        MLX_ADD, // start address
         0x00, // address step
         0x01  // number of reads
     };
@@ -459,20 +537,21 @@ mlx90620_ptat()
         ) return 0;
 
     ptat = ( ptat_bytes[1] << 8 ) | ptat_bytes[0];
+    if (DEBUG) printf ("PTAT: %d\n", ptat);
     return ptat;
 }
 
 /* Compensation pixel read */
 
 int
-mlx90620_cp()
+mlx9062x_cp()
 {
     int cp;
     signed char VCP_BYTES[2];
 
     const unsigned char compensation_pixel_read[] = {
         0x02, // command
-        0x91, // start address
+        (MLX_ADD+1), // start address
         0x00, // address step
         0x01  // number of reads
     };
@@ -484,27 +563,38 @@ mlx90620_cp()
         == BCM2835_I2C_REASON_OK
         ) return 0;
 
-    cp = ( VCP_BYTES[1] << 8 ) | VCP_BYTES[0];
+    cp = signConv16 (( VCP_BYTES[1] << 8 ) | VCP_BYTES[0]);
     return cp;
 }
 
 /* calculation of absolute chip temperature */
 
 float
-mlx90620_ta()
+mlx9062x_ta()
 {
-    int ptat = mlx90620_ptat();
-    int vth = ( EEPROM[0xDB] << 8 ) | EEPROM[0xDA];
-    float kt1 = (( EEPROM[0xDD] << 8 ) | EEPROM[0xDC]) / 1024.0;
-    float kt2 = (( EEPROM[0xDF] << 8 ) | EEPROM[0xDE]) / 1048576.0;
-    
-    return ((-kt1 + sqrt( kt1*kt1 - (4 * kt2) * (vth - ptat) )) / (2 * kt2) ) + 25.0;
+    int ptat  = mlx9062x_ptat();
+    int vth   =  signConv16 (( EEPROM[0xDB] << 8 ) | EEPROM[0xDA]);
+    unsigned int   kt1_scale = EEPROM[0xD2];
+	           kt1_scale = (kt1_scale >> 4) & 0xf;
+    unsigned int   kt2_scale = EEPROM[0xD2];
+                   kt2_scale &= 0xf;
+
+    float kt1 = signConv16 (( EEPROM[0xDD] << 8 ) | EEPROM[0xDC]) ;
+    float kt2 = signConv16 (( EEPROM[0xDF] << 8 ) | EEPROM[0xDE]) ;
+
+    if (DEBUG) printf ("KT1=%f, KT2=%f, KT_SCALE=%d %d\n", kt1, kt2, kt1_scale, kt2_scale);
+    kt1 /= (1 << kt1_scale); 
+    kt2 /= (1 << (kt2_scale+10)); 
+
+    if (DEBUG) printf ("VTH=%d, KT1=%f, KT2=%f, KT_SCALE=%x %d %d\n", vth, kt1, kt2, EEPROM[0xD2], kt1_scale, kt2_scale);
+
+    return (float) ((-kt1 + sqrt( kt1*kt1 - (4 * kt2) * (vth - ptat) )) / (2 * kt2) ) + 25.0;
 }
 
 /* IR data read */
 
 int
-mlx90620_ir_read()
+mlx9062x_ir_read()
 {
     const unsigned char ir_whole_frame_read[] = {
         0x02, // command
@@ -569,3 +659,4 @@ Options:\n\
 ");
   exit (status);
 }
+

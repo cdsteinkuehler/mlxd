@@ -2,14 +2,15 @@ mlxd
 ==========
 
 ## Updates (SVTechie)
-  - Please follow blog post regarding this for more details. (Need to be updated)
-  - Original code was for MLX90620. Updated for MLX90621 support.
-  - If compiling code for MLX90620, please update line number 40 in mlxd.c
-  - For debug messages, set debug flags
-     - DEBUG:    Prints intermediate debug values
-     - DEBUG_TO: Prints information instead of sending to /var/run/mlx9062x.sock
-  - Other debug option is to run following command to read socket through python command
-     - sudo python sensor_read.py
+  - Please follow blog post for more details. Link needs to be updated
+  - Original code was for MLX90620 only, not for MLX90621. Added MLX90621 support.
+  - To compile code for MLX90620, please update line number 40 in mlxd.c
+  - For debugging: 
+     - Please set following debug flags in mlxd.c
+       - DEBUG:    Prints intermediate debug values
+       - DEBUG_TO: Prints information instead of sending to /var/run/mlx9062x.sock
+     - Read socket data through following command
+     	- sudo python sensor_read.py
  
 ==========
 
