@@ -2,10 +2,10 @@ mlxd
 ==========
 
 ## Updates (SVTechie)
-  - Please follow blog post for more details. Link needs to be updated
-  - Original code was for MLX90620 only, not for MLX90621. Added MLX90621 support.
+  - More details at http://wp.me/p8pYL0-b0
+  - Original code works for MLX90620, not for MLX90621. Added MLX90621 support.
   - To compile code for MLX90620, please update line number 40 in mlxd.c
-  - For debugging: 
+  - For enhanced debugging: 
      - Please set following debug flags in mlxd.c
        - DEBUG:    Prints intermediate debug values
        - DEBUG_TO: Prints information instead of sending to /var/run/mlx9062x.sock
