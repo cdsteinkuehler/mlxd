@@ -35,7 +35,7 @@
 #include <getopt.h>
 #include <math.h>
 #include <signal.h>
-#include <bcm2835.h>
+#include "linux-i2c.h"
 
 #define VERSION "0.1.0"
 #define EXIT_FAILURE 1
@@ -102,7 +102,7 @@ char mlxFifo[] = "/var/run/mlx9062x.sock" ;
 
 void got_sigint(int sig) {
     unlink(mlxFifo); 
-    bcm2835_i2c_end();
+    linux_i2c_end();
     exit(0);
    
 }
@@ -301,13 +301,14 @@ main (int argc, char **argv)
 int
 mlx9062x_init()
 {
-    if (!bcm2835_init()) return 0;
-    bcm2835_i2c_begin();
-    bcm2835_i2c_set_baudrate(25000);
+    if (!linux_i2c_init(1)) return 0;
+    linux_i2c_begin();
+    linux_i2c_set_baudrate(25000);
     
     //sleep 5ms per datasheet
     usleep(5000);
     if ( !mlx9062x_read_eeprom() ) return 0;
+
     if ( !mlx9062x_write_trim( EEPROM[0xF7] ) ) return 0;
     // Forcing scaling/precision to 3
     if ( !mlx9062x_write_config( &EEPROM[0xF5], &EEPROM[0xF6] ) ) return 0;
@@ -329,11 +330,11 @@ mlx9062x_read_eeprom()
         0x00 // command
     };
 
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x50);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x50);
     if (
-        bcm2835_i2c_write_read_rs((char *)&read_eeprom, 1, EEPROM, 256)
-        == BCM2835_I2C_REASON_OK
+        linux_i2c_write_read_rs((char *)&read_eeprom, 1, EEPROM, 256)
+        == LINUX_I2C_REASON_OK
         ) return 1;
 
     return 0;
@@ -356,11 +357,11 @@ mlx9062x_write_config(unsigned char *lsb, unsigned char *msb)
         msb[0]
     };
 
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x60);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x60);
     if (
-        bcm2835_i2c_write((const char *)&write_config, 5)
-        == BCM2835_I2C_REASON_OK
+        linux_i2c_write((const char *)&write_config, 5)
+        == LINUX_I2C_REASON_OK
         ) return 1;
 
     return 0;
@@ -380,11 +381,11 @@ mlx9062x_read_config(unsigned char *lsb, unsigned char *msb)
         0x01  // number of reads
     };
 
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x60);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x60);
     if (
-        !bcm2835_i2c_write_read_rs((char *)&read_config, 4, config, 2)
-        == BCM2835_I2C_REASON_OK
+        !linux_i2c_write_read_rs((char *)&read_config, 4, config, 2)
+        == LINUX_I2C_REASON_OK
         ) return 0;
 
     *lsb = config[0];
@@ -412,11 +413,11 @@ mlx9062x_write_trim(char t)
         trim[0]
     };
     
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x60);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x60);
     if (
-        bcm2835_i2c_write((char *)&write_trim, 5)
-        == BCM2835_I2C_REASON_OK
+        linux_i2c_write((char *)&write_trim, 5)
+        == LINUX_I2C_REASON_OK
         ) return 1;
     
     return 0;
@@ -436,11 +437,11 @@ mlx9062x_read_trim()
         0x01  // number of reads
     };
     
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x60);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x60);
     if (
-        bcm2835_i2c_write_read_rs((char *)&read_trim, 4, trim_bytes, 2)
-        == BCM2835_I2C_REASON_OK
+        linux_i2c_write_read_rs((char *)&read_trim, 4, trim_bytes, 2)
+        == LINUX_I2C_REASON_OK
         ) return 1;
     
     return trim_bytes[0];
@@ -529,11 +530,11 @@ mlx9062x_ptat()
         0x01  // number of reads
     };
 
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x60);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x60);
     if (
-        !bcm2835_i2c_write_read_rs((char *)&read_ptat, 4, (char *)&ptat_bytes, 2)
-        == BCM2835_I2C_REASON_OK
+        !linux_i2c_write_read_rs((char *)&read_ptat, 4, (char *)&ptat_bytes, 2)
+        == LINUX_I2C_REASON_OK
         ) return 0;
 
     ptat = ( ptat_bytes[1] << 8 ) | ptat_bytes[0];
@@ -556,11 +557,11 @@ mlx9062x_cp()
         0x01  // number of reads
     };
 
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x60);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x60);
     if (
-        !bcm2835_i2c_write_read_rs((char *)&compensation_pixel_read, 4, (char *)&VCP_BYTES, 2)
-        == BCM2835_I2C_REASON_OK
+        !linux_i2c_write_read_rs((char *)&compensation_pixel_read, 4, (char *)&VCP_BYTES, 2)
+        == LINUX_I2C_REASON_OK
         ) return 0;
 
     cp = signConv16 (( VCP_BYTES[1] << 8 ) | VCP_BYTES[0]);
@@ -603,11 +604,11 @@ mlx9062x_ir_read()
         0x40  // number of reads
     };
 
-    bcm2835_i2c_begin();
-    bcm2835_i2c_setSlaveAddress(0x60);
+    linux_i2c_begin();
+    linux_i2c_setSlaveAddress(0x60);
     if (
-        bcm2835_i2c_write_read_rs((char *)&ir_whole_frame_read, 4, ir_pixels, 128)
-        == BCM2835_I2C_REASON_OK
+        linux_i2c_write_read_rs((char *)&ir_whole_frame_read, 4, ir_pixels, 128)
+        == LINUX_I2C_REASON_OK
         ) return 1;
 
     return 0;

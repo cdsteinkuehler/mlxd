@@ -13,8 +13,12 @@
 
 
 
-LIBS=-lm -lbcm2835
+LIBS=-lm
 
+DEPS=linux-i2c.o
 
-mlxd: mlxd.c
-	cc -o mlxd mlxd.c $(LIBS)
+%.o: %.c %.h
+	cc -ggdb -c -o $@ $<
+
+mlxd: mlxd.c $(DEPS)
+	cc -ggdb -o mlxd mlxd.c $(LIBS) $(DEPS)

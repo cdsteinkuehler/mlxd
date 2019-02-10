@@ -1,6 +1,12 @@
 mlxd
 ==========
 
+## Updates (cdsteinkuehler)
+
+  - Modified to use standard linux /dev/i2cN device instead of BCM2538 library.
+
+==========
+
 ## Updates (SVTechie)
   - More details at http://wp.me/p8pYL0-b0
   - Original code works for MLX90620, not for MLX90621. Added MLX90621 support.
