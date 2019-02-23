@@ -6,16 +6,21 @@
 // Use standard linux i2c calls instead of bcm2835 library
 #include "linux-i2c.h"
 
-int file;
+int file = -1;
 uint16_t slave_addr;
 
 
 int linux_i2c_init(int bus)
 {
-	char filename[20];
+	// Only try to open the file once
+	if (file < 0)
+	{
+		char filename[20];
 
-	snprintf(filename, 19, "/dev/i2c-%d", bus);
-	file = open(filename, O_RDWR);
+		snprintf(filename, 19, "/dev/i2c-%d", bus);
+		file = open(filename, O_RDWR);
+	}
+
 	if (file < 0)
 		return 0;
 	else
@@ -39,6 +44,8 @@ void linux_i2c_setSlaveAddress(uint8_t addr)
 
 void linux_i2c_set_baudrate(uint32_t baudrate)
 {
+	// Noop
+	// I2C speed is set by the Linux I2C driver when it loads
 };
 
     /*! Transfers any number of bytes to the currently selected I2C slave.

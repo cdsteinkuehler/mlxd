@@ -24,6 +24,7 @@
 */
 /*
    Updates: Copyright (C) 2017 Vipin Agrawal (SVTechie)
+   Updates: Copyright (C) 2019 Charles Steinkuehler (charles at steinkuehler.net)
 */
 
 #include <fcntl.h>
@@ -76,6 +77,7 @@ static struct option const long_options[] =
 {
   {"help", no_argument, 0, 'h'},
   {"version", no_argument, 0, 'V'},
+  {"bus", required_argument, 0, 'b'},
   {NULL, 0, NULL, 0}
 };
 
@@ -94,6 +96,7 @@ float mlx9062x_ta ();
 int mlx9062x_ir_read ();
 
 
+int i2c_bus = -1;
 char EEPROM[256];
 signed char ir_pixels[128];
 
@@ -301,7 +304,7 @@ main (int argc, char **argv)
 int
 mlx9062x_init()
 {
-    if (!linux_i2c_init(1)) return 0;
+    if (!linux_i2c_init(i2c_bus)) return 0;
     linux_i2c_begin();
     linux_i2c_set_baudrate(25000);
     
@@ -626,11 +629,16 @@ decode_switches (int argc, char **argv)
 
   while ((c = getopt_long (argc, argv, 
 			   "h"	/* help */
-			   "V",	/* version */
+			   "V"	/* version */
+			   "b:",/* I2C bus */
 			   long_options, (int *) 0)) != EOF)
     {
       switch (c)
 	{
+	case 'b':
+	  i2c_bus = atoi(optarg);
+	  break;
+
 	case 'V':
 	  printf ("mlx %s\n", VERSION);
       exit (0);
@@ -642,6 +650,12 @@ decode_switches (int argc, char **argv)
 	  usage (EXIT_FAILURE);
 	}
     }
+
+  if (i2c_bus < 0)
+  {
+    printf("ERROR: I2C bus must be specified!\n");
+    usage (EXIT_FAILURE);
+  }
 
   return optind;
 }
