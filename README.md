@@ -4,6 +4,7 @@ mlxd
 ## Updates (cdsteinkuehler)
 
   - Modified to use standard linux /dev/i2cN device instead of BCM2538 library.
+  - Add Machinekit HAL comonent version
 
 ==========
 

@@ -17,8 +17,13 @@ LIBS=-lm
 
 DEPS=linux-i2c.o
 
+all: mlxd mlx
+
 %.o: %.c %.h
 	cc -ggdb -c -o $@ $<
 
 mlxd: mlxd.c $(DEPS)
 	cc -ggdb -o mlxd mlxd.c $(LIBS) $(DEPS)
+
+mlx: mlx.comp linux-i2c.c
+	comp --compile $<
